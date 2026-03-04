@@ -1,110 +1,243 @@
 #pragma once
 #include <SFML/Graphics.hpp>
-#include "relationship.h" 
 #include <SFML/System.hpp>
 #include <iostream>
 #include <cmath>
 #include <cstdlib> 
+#include <string>
+
+#include "relationship.h" 
+#include "animationHandler.h" 
 
 using namespace std;
 
+//for tribe animation
+enum TribeAnimID {
+    FLY_UP = 0,    
+    FLY_DOWN = 1,  
+    FLY_LEFT = 2,  
+    FLY_RIGHT = 3  
+};
+
 class TribeEntity {
 private:
+   
     Relationship relation; 
     sf::Vector2f position;
-
     
+    // callouts
     float timeSinceLastInteraction; 
     float timeNearNeutral;          
     bool hasPrintedHostile;         
+    float assistChance;     
+    float callHelpChance;   
 
-    
-    float assistChance;     // ally assist chance
-    float callHelpChance;   // call for help
+    // stats
+    float maxAttack;        
+    float critChance;       
+    int maxHealth;      
+    int currentHealth;  
+    bool isDead;        
 
-    // helper function
+    // animations
+    sf::Texture texture;
+    sf::Sprite sprite;
+    AnimationHandler* animator; 
+
+    // randomize walking
+    sf::Vector2f randomMoveDir;
+    float randomMoveTimer;
+    float randomMoveMaxTime;
+
+   
     float getDistance(sf::Vector2f p1, sf::Vector2f p2) {
         float dx = p1.x - p2.x;
         float dy = p1.y - p2.y;
         return sqrt(dx*dx + dy*dy);
     }
 
-    // bahavior func
+    int calculateAttackDamage() {
+        float minDmgMult = 0.5f;
+        float maxDmgMult = 1.0f;
+        float randMult = minDmgMult + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (maxDmgMult - minDmgMult)));
+        float baseDmg = maxAttack * randMult;
+
+        float critRand = static_cast<float>(rand()) / RAND_MAX;
+        if (critRand < critChance) {
+            cout << "*** CRITICAL HIT! ***" << endl;
+            return static_cast<int>(baseDmg * 1.10f);
+        }
+        return static_cast<int>(baseDmg);
+    }
+
+    // behaviors
+    
+    // allies
     void performAllyBehavior(float deltaTime, sf::Vector2f playerPos) {
-        // walks closer to the player without decreasing relationshp
         float dist = getDistance(position, playerPos);
         if (dist > 80.0f) {
             sf::Vector2f direction = playerPos - position;
             float len = sqrt(direction.x*direction.x + direction.y*direction.y);
             if (len != 0) direction /= len;
+            
             position += direction * 60.0f * deltaTime;
+            
+            if (abs(direction.x) > abs(direction.y)) {
+                if (direction.x > 0) animator->play(FLY_RIGHT);
+                else animator->play(FLY_LEFT);
+            } else {
+                if (direction.y > 0) animator->play(FLY_DOWN);
+                else animator->play(FLY_UP);
+            }
+        } else {
+            animator->play(FLY_UP);
         }
     }
 
+    // neutrals
     void performNeutralBehavior(float deltaTime, sf::Vector2f playerPos) {
         float dist = getDistance(position, playerPos);
         
-        if (dist < 10.0f) { 
+        if (dist < 20.0f) { // ttoo close
             timeNearNeutral += deltaTime;
-            
-            // decreases relationship once getting too close
             relation.modify(-2.0f * deltaTime); 
             
-            // decreases in a faster rate
             if (timeNearNeutral > 3.0f) {
                 cout << "The neutral tribe is annoyed by your presence!\n";
                 relation.modify(-15.0f); 
-                timeNearNeutral = 0.0f; // reset
+                timeNearNeutral = 0.0f; 
             }
+            animator->play(FLY_UP);
         } else {
-            timeNearNeutral = 0.0f; // retreat
+            timeNearNeutral = 0.0f;
+            performRandomWalk(deltaTime, 40.0f); 
         }
     }
 
+    // hostiles
     void performHostileBehavior(float deltaTime, sf::Vector2f playerPos) {
-        // prints once
         if (!hasPrintedHostile) {
-            cout << "(Hostile) The tribe is attacking you!\n";
+            cout << "(Hostile) The tribe is aggressive and attacking you!\n";
             hasPrintedHostile = true;
         }
 
-        // charges towards the player
         float dist = getDistance(position, playerPos);
-        if (dist < 150.0f) {
+        if (dist < 200.0f) { 
             sf::Vector2f direction = playerPos - position;
             float len = sqrt(direction.x*direction.x + direction.y*direction.y);
             if (len != 0) direction /= len;
-            position += direction * 120.0f * deltaTime; // runs fastr
+            
+            position += direction * 120.0f * deltaTime; 
+
+            if (abs(direction.x) > abs(direction.y)) {
+                if (direction.x > 0) animator->play(FLY_RIGHT);
+                else animator->play(FLY_LEFT);
+            } else {
+                if (direction.y > 0) animator->play(FLY_DOWN);
+                else animator->play(FLY_UP);
+            }
+
+            // attacks a player
+            if (dist < 20.0f && rand() % 100 < 5) { 
+                int dmg = calculateAttackDamage();
+                cout << "(Hostile Tribe) Attacks you for " << dmg << " damage!" << endl;
+            }
+        } else {
+            animator->play(FLY_UP);
+        }
+    }
+
+    void performRandomWalk(float deltaTime, float speed) {
+        randomMoveTimer -= deltaTime;
+        
+        if (randomMoveTimer <= 0.0f) {
+            float rx = static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0f)) - 1.0f;
+            float ry = static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0f)) - 1.0f;
+            randomMoveDir = sf::Vector2f(rx, ry);
+
+            float len = sqrt(randomMoveDir.x*randomMoveDir.x + randomMoveDir.y*randomMoveDir.y);
+            if (len != 0) randomMoveDir /= len;
+            else randomMoveDir = sf::Vector2f(0,0); 
+
+            randomMoveMaxTime = 1.0f + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 3.0f));
+            randomMoveTimer = randomMoveMaxTime;
+        }
+
+        position += randomMoveDir * speed * deltaTime;
+
+        if (randomMoveDir.x == 0 && randomMoveDir.y == 0) {
+            animator->play(FLY_UP);
+        } else {
+            if (abs(randomMoveDir.x) > abs(randomMoveDir.y)) {
+                if (randomMoveDir.x > 0) animator->play(FLY_RIGHT);
+                else animator->play(FLY_LEFT);
+            } else {
+                if (randomMoveDir.y > 0) animator->play(FLY_DOWN);
+                else animator->play(FLY_UP);
+            }
         }
     }
 
 public:
-    TribeEntity(float startScore, sf::Vector2f startPos) 
-    : relation(startScore), position(startPos) {
+    // constructors
+    TribeEntity(float startScore, sf::Vector2f startPos, std::string textureFile) 
+    : relation(startScore), position(startPos), randomMoveTimer(0), randomMoveDir(0,0) {
         timeSinceLastInteraction = 0.0f;
         timeNearNeutral = 0.0f;
         hasPrintedHostile = false;
 
-        // randomizing chances
+        // assist chances
         assistChance = (rand() % 50 + 30) / 100.0f; 
         callHelpChance = (rand() % 60 + 20) / 100.0f;
+
+        // randomize stats
+        maxAttack = static_cast<float>(rand() % 31 + 20); 
+        critChance = (static_cast<float>(rand() % 21 + 5)) / 100.0f;
+        maxHealth = rand() % 151 + 100; 
+        currentHealth = maxHealth;
+        isDead = false;
+
+        cout << "Tribe Spawned -> HP: " << maxHealth << " | MaxAtk: " << maxAttack << " | Crit: " << (critChance*100) << "%\n";
+
+        // load texture
+        if (!texture.loadFromFile(textureFile)) { 
+             cerr << "Error: Cannot load " << textureFile << endl;
+        }
+        sprite.setTexture(texture);
+        sprite.setPosition(position);
+        sprite.setScale(2.0f, 2.0f); 
+
+        // animation
+        animator = new AnimationHandler(sprite);
+        float animSpeed = 0.1f; 
+        // 38x50 sprite sheet
+        animator->addAnimation({0, 6, 38, 50, 0, 0,   animSpeed}); // FLY_UP
+        animator->addAnimation({1, 6, 38, 50, 0, 55,  animSpeed}); // FLY_DOWN
+        animator->addAnimation({2, 6, 38, 50, 0, 110, animSpeed}); // FLY_LEFT
+        animator->addAnimation({3, 6, 38, 50, 0, 165, animSpeed}); // FLY_RIGHT
+        
+        animator->play(FLY_UP); 
+    }
+
+    ~TribeEntity() {
+        delete animator;
     }
     
     void update(float deltaTime, sf::Vector2f playerPos) {
-        // time decay
+        if (isDead) return;
+
+        // neglected for a moment --> decreases relationship
         timeSinceLastInteraction += deltaTime;
-        if (timeSinceLastInteraction > 15.0f) { 
-            relation.modify(-0.5f * deltaTime); // gradually decreases
+        if (timeSinceLastInteraction > (60.0f * 3.0f)) { 
+            relation.modify(-0.5f * deltaTime); 
         }
 
         RelationState currentState = relation.getState();
 
-        // once it's not hostile
         if (currentState != RelationState::Hostile) {
             hasPrintedHostile = false;
         }
 
-        // more behaviors
         switch (currentState) {
             case RelationState::Ally:
                 performAllyBehavior(deltaTime, playerPos);
@@ -116,27 +249,59 @@ public:
                 performHostileBehavior(deltaTime, playerPos);
                 break;
         }
+
+        sprite.setPosition(position);
+        animator->update(deltaTime);
     }
     
-    // events
+    void draw(sf::RenderWindow& window) {
+        if (!isDead) {
+            window.draw(sprite);
+        }
+    }
+
+    // damag
+    void takeDamage(int amount) {
+        if (isDead) return;
+
+        currentHealth -= amount;
+        cout << "Tribe takes " << amount << " damage! (HP: " << currentHealth << "/" << maxHealth << ")\n";
+
+        if (currentHealth <= 0) {
+            currentHealth = 0;
+            isDead = true;
+            cout << "The Tribe entity has been defeated!\n";
+        } else {
+            onAttackedByPlayer(); 
+        }
+    }
+
+    
 
     void receiveItem() { 
         relation.modify(15.0f); 
-        timeSinceLastInteraction = 0.0f; //resets time decay
+        timeSinceLastInteraction = 0.0f; 
         cout << "Item Given! Tribe relationship increased.\n";
     }
 
+    // item giving (ally)
+    void giveRandomItemToPlayer() {
+        if (relation.getState() == RelationState::Ally) {
+            cout << "*** The Ally tribe gifted you a special item! ***\n";
+        }
+    }
     
+    // gathering stuffs 
     void onPlayerGatherItem(sf::Vector2f playerPos) {
+        if (isDead) return;
+
         float dist = getDistance(position, playerPos);
         RelationState state = relation.getState();
 
         if (state == RelationState::Ally && dist < 10.0f) {
-            
             cout << "You safely gathered items near your Ally.\n";
-            
         } else if (state == RelationState::Neutral) {
-           
+            // การไปเก็บของใน region ของเผ่า neutral มีโอกาสทำให้ไม่พอใจ 
             if (rand() % 100 < 60) { 
                 relation.modify(-10.0f);
                 cout << "The Neutral tribe did not like you stealing their resources!\n";
@@ -145,32 +310,32 @@ public:
         timeSinceLastInteraction = 0.0f; 
     }
 
-    //gets attacked
+    // กรณี ally อยู่ใกล้แล้วผู้เล่นโดนโจมตี 
     void onPlayerAttacked(sf::Vector2f playerPos) {
+        if (isDead) return;
+
         float dist = getDistance(position, playerPos);
-        
         if (relation.getState() == RelationState::Ally && dist < 50.0f) {
-            
             if ((rand() % 100 / 100.0f) < assistChance) {
                 cout << "*** The Ally Tribe jumps in to protect you! ***\n";
-                
             }
         }
     }
 
-    // player attacks a tribe
+    // attack sa tribe
     void onAttackedByPlayer() {
         relation.modify(-20.0f); 
         timeSinceLastInteraction = 0.0f;
         
         if (relation.getState() == RelationState::Hostile) {
-            // calls for its tribe
+            // calls for more tribe members
             if ((rand() % 100 / 100.0f) < callHelpChance) {
                 cout << "*** The tribe sounded a horn! Reinforcements are coming! ***\n";
-                
             }
         }
     }
     
+    // getter funcs
     sf::Vector2f getPosition() { return position; } 
+    bool isEntityDead() const { return isDead; }
 };

@@ -1,5 +1,5 @@
 #pragma once // prevents including more than once
-#include <algorithm> // for std::clamp
+#include <algorithm> 
 
 enum class RelationState {
     Hostile,Neutral,Ally     
